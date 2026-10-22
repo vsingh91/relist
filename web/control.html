@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relist control room</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  h2 { font-size: 15px; margin: 28px 0 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  .table-wrap { overflow-x: auto; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); }
+  table.compare { border-collapse: collapse; width: 100%; font-size: 14px; }
+  table.compare th, table.compare td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.compare th:first-child, table.compare td:first-child { text-align: left; }
+  table.compare th { font-weight: 600; color: var(--muted); font-size: 12px; }
+  table.compare tr.on td { background: var(--surface-2); }
+  table.compare tr { cursor: pointer; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .kpi { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 14px; }
+  .kpi b { display: block; font-size: 22px; letter-spacing: -0.02em; }
+  .kpi span { font-size: 12px; color: var(--muted); }
+  .item { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; margin-bottom: 16px;
+          display: grid; grid-template-columns: 190px 1fr; gap: 16px; }
+  .item .orig img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; display: block; }
+  .item .orig h3 { font-size: 15px; margin: 8px 0 4px; }
+  .attempts { display: grid; gap: 12px; }
+  .attempt { border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: grid; grid-template-columns: 150px 1fr; gap: 12px; }
+  .attempt.chosen { border-color: var(--pass); }
+  .attempt img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; display: block; }
+  .attempt .head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .attempt .why { font-size: 13px; color: var(--muted); margin: 4px 0 6px; }
+  table.checks { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table.checks td { padding: 4px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  table.checks td.name { white-space: nowrap; font-weight: 600; width: 1%; }
+  table.checks td.you { white-space: nowrap; width: 1%; }
+  .you button { padding: 1px 7px; font-size: 12px; margin-left: 2px; }
+  .you button.sel.pass { background: var(--pass-bg); color: var(--pass); border-color: var(--pass); }
+  .you button.sel.fail { background: var(--fail-bg); color: var(--fail); border-color: var(--fail); }
+  .you button.sel.na { background: var(--na-bg); color: var(--na); border-color: var(--na); }
+  details { margin-top: 8px; font-size: 13px; }
+  details p { margin: 6px 0; white-space: pre-wrap; color: var(--muted); }
+  .note { font-size: 13px; color: var(--muted); }
+  @media (max-width: 760px) {
+    .item { grid-template-columns: 1fr; }
+    .item .orig img { max-width: 220px; }
+    .attempt { grid-template-columns: 1fr; }
+    .attempt img { max-width: 220px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Relist</h1>
+  <nav><a href="index.html">Shop window</a><a href="control.html" class="on">Control room</a></nav>
+  <span class="spacer"></span>
+  <span id="picker"></span>
+</header>
+<main id="main"><div class="empty">Loading…</div></main>
+<script src="common.js"></script>
+<script>
+let runs = [];
+let current = null;
+
+async function start() {
+  runs = (await loadRuns()).filter((r) => r.mode !== "looks");
+  if (!runs.length) {
+    document.getElementById("main").replaceChildren(el("div", { class: "empty" }, "No runs yet. Run: uv run run.py agent"));
+    return;
+  }
+  render(new URLSearchParams(location.search).get("run") || runs[0].id);
+}
+
+// Checker versus your grades, for one run.
+function accuracy(run) {
+  let graded = 0, agree = 0, missed = 0, wasted = 0, shippedBad = 0;
+  for (const item of run.items) {
+    for (const a of item.attempts || []) {
+      const mine = gradeOverall((run.grades[item.item] || {})[a.n]);
+      const theirs = a.check && a.check.overall;
+      if (mine && theirs) {
+        graded++;
+        if (mine === theirs) agree++;
+        else if (theirs === "pass") missed++;
+        else wasted++;
+      }
+    }
+    const pub = publishedAttempt(item);
+    if (pub && item.decision === "published") {
+      const mine = gradeOverall((run.grades[item.item] || {})[pub.n]);
+      if ((mine || (pub.check && pub.check.overall)) === "fail") shippedBad++;
+    }
+  }
+  return { graded, agree: graded ? agree / graded : null, missed, wasted, shippedBad };
+}
+
+function render(runId) {
+  current = runs.find((r) => r.id === runId) || runs[0];
+  history.replaceState(null, "", `?run=${current.id}`);
+  document.getElementById("picker").replaceChildren(runSelect(runs, current.id, render));
+  const main = document.getElementById("main");
+  main.replaceChildren(
+    el("h2", {}, "All runs"), compareTable(),
+    el("h2", {}, `This run · ${modeLabel(current.mode)}`), kpis(current),
+    current.mode === "fixed"
+      ? el("p", { class: "note" }, "Fixed rules decide on Photoroom's cutout confidence only. The checker inspected every photo to measure, but its verdict didn't change any decision.")
+      : el("p", { class: "note" }, "The agent picks the style; an independent checker inspects every result; code blocks publishing anything that failed."),
+    el("h2", {}, "Items"),
+    ...current.items.map((item) => itemCard(current, item)));
+}
+
+function compareTable() {
+  const head = ["Run", "Items", "Listed", "To a person", "No human needed", "Photoroom calls", "Photoroom $", "Claude $",
+    "Total $", "$ per listed photo", "Shipped a failed photo", "Checker agrees with you"];
+  const rows = runs.map((r) => {
+    const t = r.totals || {}, acc = accuracy(r);
+    return el("tr", { class: r.id === current.id ? "on" : "", onclick: () => render(r.id) },
+      el("td", {}, `${modeLabel(r.mode)} · ${r.started}`),
+      el("td", {}, t.items ?? 0), el("td", {}, t.published ?? 0), el("td", {}, t.to_person ?? 0),
+      el("td", {}, pct(t.automatic_rate)), el("td", {}, t.photoroom_calls ?? 0),
+      el("td", {}, money(t.photoroom_cost)), el("td", {}, money(t.claude_cost)), el("td", {}, money(t.total_cost)),
+      el("td", {}, money(t.cost_per_published, 3)), el("td", {}, acc.shippedBad),
+      el("td", {}, acc.graded ? `${pct(acc.agree)} of ${acc.graded}` : "not graded"));
+  });
+  return el("div", { class: "table-wrap" },
+    el("table", { class: "compare" }, el("thead", {}, el("tr", {}, head.map((h) => el("th", {}, h)))), el("tbody", {}, rows)));
+}
+
+function kpis(run) {
+  const t = run.totals || {}, acc = accuracy(run);
+  const box = (value, label) => el("div", { class: "kpi" }, el("b", {}, value), el("span", {}, label));
+  return el("div", { class: "kpis" },
+    box(money(t.cost_per_published, 3), "cost per listed photo"),
+    box(pct(t.automatic_rate), "listed with no human"),
+    box(`${t.photoroom_calls ?? 0}`, "Photoroom calls"),
+    box(money(t.total_cost), "total cost (list prices)"),
+    box(`${acc.shippedBad}`, "listed but failed a check"),
+    box(acc.graded ? pct(acc.agree) : "–", `checker agrees with you (${acc.graded} graded)`),
+    box(`${acc.missed}`, "checker passed, you failed"),
+    box(`${acc.wasted}`, "checker failed, you passed"));
+}
+
+function itemCard(run, item) {
+  const live = item.decision === "published";
+  return el("div", { class: "item" },
+    el("div", { class: "orig" },
+      img(run, item.original),
+      el("h3", {}, nice(item.item)),
+      el("span", { class: `pill ${live ? "pass" : "warn"}` }, live ? `Listed: attempt ${item.published_attempt}` : "Sent to a person"),
+      el("p", { class: "note" }, item.reason),
+      el("p", { class: "note" },
+        `${item.photoroom_calls} call(s) · ${item.seconds}s · ${money(item.total_cost, 3)} `,
+        el("span", {}, `(Photoroom ${money(item.photoroom_cost)}, agent ${money(item.claude_cost_agent, 3)}, checker ${money(item.claude_cost_checker, 3)})`))),
+    el("div", {},
+      el("div", { class: "attempts" }, (item.attempts || []).map((a) => attemptCard(run, item, a))),
+      item.agent_notes && item.agent_notes.length
+        ? el("details", {}, el("summary", {}, "Agent's reasoning"), item.agent_notes.map((n) => el("p", {}, n)))
+        : null));
+}
+
+function attemptCard(run, item, a) {
+  const c = a.check;
+  const grade = (run.grades[item.item] || {})[a.n] || { checks: {} };
+  const scores = [
+    `${a.seconds}s`,
+    a.uncertainty !== null ? `cutout ${a.uncertainty < 0 ? "n/a (person)" : a.uncertainty.toFixed(3)}` : null,
+    a.crop_score !== null ? `crop ${a.crop_score}` : null,
+    a.live_key ? "live key" : "sandbox",
+  ].filter(Boolean).join(" · ");
+  const rows = c && c.checks ? Object.entries(CHECKS).map(([key, name]) => {
+    const v = c.checks[key];
+    if (!v) return null;
+    return el("tr", {},
+      el("td", { class: "name" }, name),
+      el("td", {}, el("span", { class: `pill ${v.verdict === "not_applicable" ? "na" : v.verdict}` }, v.verdict === "not_applicable" ? "n/a" : v.verdict), " ", v.note),
+      el("td", { class: "you" }, yourButtons(run, item, a, key, grade)));
+  }) : [];
+  return el("div", { class: `attempt ${item.published_attempt === a.n && item.decision === "published" ? "chosen" : ""}` },
+    img(run, a.image),
+    el("div", {},
+      el("div", { class: "head" },
+        el("b", {}, `#${a.n} ${a.label}`),
+        a.http !== 200 ? el("span", { class: "pill fail" }, `Photoroom error ${a.http}`) : null,
+        c ? el("span", { class: `pill ${c.overall}` }, `checker: ${c.overall}`) : null,
+        c && c.used_for_decision === false ? el("span", { class: "pill na" }, "measured only") : null,
+        a.options && a.options["background.prompt"] ? el("span", { class: "muted small" }, `“${a.options["background.prompt"]}”`) : null),
+      el("div", { class: "why" }, a.why, " ", el("span", { class: "small" }, `(${scores})`)),
+      a.error ? el("div", { class: "note" }, a.error) : null,
+      c ? el("div", { class: "note" }, c.summary) : null,
+      rows.length ? el("table", { class: "checks" },
+        el("tr", {}, el("td", {}), el("td", { class: "muted small" }, "Checker"),
+          el("td", { class: "you muted small" }, "You ",
+            el("button", { title: "Copy the checker's verdicts as yours", onclick: () => agreeAll(run, item, a) }, "agree all"))),
+        rows) : null));
+}
+
+function yourButtons(run, item, a, key, grade) {
+  const mine = grade.checks[key];
+  const b = (val, label, cls) => el("button", { class: `${mine === val ? "sel" : ""} ${cls}`, title: val,
+    onclick: () => {
+      // Read the latest saved grade at click time, not the one this button was drawn with.
+      const latest = ((run.grades[item.item] || {})[a.n] || { checks: {} }).checks;
+      setGrade(run, item, a, { ...latest, [key]: latest[key] === val ? undefined : val });
+    } }, label);
+  return [b("pass", "✓", "pass"), b("fail", "✗", "fail"), b("not_applicable", "–", "na")];
+}
+
+function agreeAll(run, item, a) {
+  const checks = {};
+  for (const [k, v] of Object.entries(a.check.checks)) checks[k] = v.verdict;
+  setGrade(run, item, a, checks);
+}
+
+async function setGrade(run, item, a, checks) {
+  for (const k of Object.keys(checks)) if (checks[k] === undefined) delete checks[k];
+  const grade = { checks, overall: gradeOverall({ checks }) };
+  run.grades[item.item] = { ...(run.grades[item.item] || {}), [a.n]: grade };
+  await fetch("/api/grade", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ run: run.id, item: item.item, attempt: a.n, grade }) });
+  const y = window.scrollY;
+  render(run.id);
+  window.scrollTo(0, y);
+}
+
+start();
+</script>
+</body>
+</html>

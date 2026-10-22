@@ -1,0 +1,29 @@
+# Relist listing rules.
+# The agent reads this file at the start of every run. Change a rule here and
+# rerun: the agent's choices change with no code change.
+
+marketplace = "Relist, a second-hand fashion marketplace (think Vinted or Depop)"
+
+# Hard limit on Photoroom calls per item. Every call costs money ($0.10 list price).
+max_photoroom_calls_per_item = 4
+
+# Styles the agent may use. Remove one to take it off the menu.
+allowed_styles = [
+  "white_shadow",
+  "blurred_original",
+  "ai_scene",
+  "ghost_mannequin",
+  "flat_lay",
+  "on_model",
+  "ironed",
+]
+
+rules = [
+  "The listing photo must show the real item. Never change its colour, shape, pattern, logos or text.",
+  "Wear and damage must stay visible. Buyers of second-hand items need to judge condition.",
+  "Listing photos are square.",
+  "Clothing: prefer showing it worn (on a model) or as if worn (invisible mannequin) when the photo allows it. Otherwise a clean white background.",
+  "Shoes, bags and accessories: white background with a soft shadow, or a simple, neutral scene.",
+  "Keep it authentic. No glamorous scenes that make a used item look new.",
+  "Spend as little as possible. Once a photo passes the check, publish it. Don't try extra styles for fun.",
+]

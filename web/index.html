@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relist shop window</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; }
+  .card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+  .card .photo { position: relative; aspect-ratio: 1; background: var(--surface-2); }
+  .card .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card .photo .badge { position: absolute; top: 10px; left: 10px; }
+  .card .photo .before {
+    position: absolute; right: 8px; bottom: 8px; width: 34%; height: auto; aspect-ratio: 1; object-fit: cover;
+    border: 2px solid var(--surface); border-radius: 6px; box-shadow: var(--shadow);
+  }
+  .card .photo.review img { filter: grayscale(1); opacity: 0.55; }
+  .card .body { padding: 10px 12px 12px; }
+  .card .title { font-weight: 600; }
+  .card .meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .looks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 26px; }
+  .looks figure { margin: 0; }
+  .looks img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: var(--surface-2); display: block; }
+  .looks figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .looks-item h3 { font-size: 15px; margin: 0 0 8px; }
+  @media (max-width: 640px) { .looks { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Relist</h1>
+  <nav><a href="index.html" class="on">Shop window</a><a href="control.html">Control room</a></nav>
+  <span class="spacer"></span>
+  <span id="picker"></span>
+</header>
+<main id="main"><div class="empty">Loading…</div></main>
+<script src="common.js"></script>
+<script>
+let runs = [];
+let showBefore = true;
+
+async function start() {
+  runs = await loadRuns();
+  const first = runs.find((r) => r.mode === "agent") || runs.find((r) => r.mode !== "looks") || runs[0];
+  if (!first) {
+    document.getElementById("main").replaceChildren(el("div", { class: "empty" }, "No runs yet. Run: uv run run.py agent"));
+    return;
+  }
+  render(new URLSearchParams(location.search).get("run") || first.id);
+}
+
+function render(runId) {
+  const run = runs.find((r) => r.id === runId) || runs[0];
+  history.replaceState(null, "", `?run=${run.id}`);
+  document.getElementById("picker").replaceChildren(runSelect(runs, run.id, render));
+  const main = document.getElementById("main");
+  main.replaceChildren(run.mode === "looks" ? looksView(run) : shopView(run));
+}
+
+function shopView(run) {
+  const t = run.totals || {};
+  const bar = el("div", { class: "bar" },
+    el("span", { class: "muted small" },
+      `${t.published ?? 0} listed · ${t.to_person ?? 0} under review · built by ${modeLabel(run.mode).toLowerCase()}`),
+    el("span", { class: "spacer" }),
+    el("label", { class: "small" },
+      el("input", { type: "checkbox", checked: showBefore ? "checked" : null,
+        onchange: (e) => { showBefore = e.target.checked; render(run.id); } }),
+      " Show the seller's photo"));
+  const grid = el("div", { class: "grid" });
+  for (const item of run.items) {
+    const a = publishedAttempt(item);
+    const live = item.decision === "published";
+    const main = a ? img(run, a.image) : img(run, item.original);
+    grid.append(el("div", { class: "card" },
+      el("div", { class: `photo ${live ? "" : "review"}` },
+        main,
+        el("span", { class: `pill badge ${live ? "pass" : "warn"}` }, live ? "Listed" : "Under review"),
+        showBefore && a ? img(run, item.original, "before") : null),
+      el("div", { class: "body" },
+        el("div", { class: "title" }, nice(item.item)),
+        el("div", { class: "meta" }, a ? a.label : "Waiting for a person to check the photo"))));
+  }
+  return el("div", {}, bar, grid);
+}
+
+function looksView(run) {
+  const wrap = el("div", {},
+    el("p", { class: "muted" },
+      "The look test, from Depop's story: the same photo three ways. Which one would you trust as a second-hand buyer?"));
+  const names = { white_plain: "Plain white", white_shadow: "White + shadow", blurred_original: "Blurred original" };
+  for (const item of run.items) {
+    const figs = [el("figure", {}, img(run, item.original), el("figcaption", {}, "Seller's photo"))];
+    for (const [style, label] of Object.entries(names)) {
+      const look = item.looks[style];
+      figs.push(el("figure", {}, img(run, look && look.image), el("figcaption", {}, label)));
+    }
+    wrap.append(el("div", { class: "looks-item" }, el("h3", {}, nice(item.item)), el("div", { class: "looks" }, figs)));
+  }
+  return wrap;
+}
+
+start();
+</script>
+</body>
+</html>
